@@ -1,0 +1,212 @@
+---
+title: "Research Project"
+author: "Xiao Xiao"
+date: "2023-06-27"
+output: html_document
+---
+1. introduction of project
+
+2. run competing models and present in a table
+
+3. avoid screen shots
+
+4. screenreg
+
+Imported data from Kaggle.
+This research project is targeted to predict the probability of company bankruptcy based on original 6819 observations with 96 financial indicators of enterprises across Taiwan.
+```{r}
+df <- read.csv("/Users/xiaoxiao/Downloads/ME315/data.csv")
+dim(df)
+any(is.na(df))
+```
+
+Then, we select and observe some important features according in financial accounting.
+```{r}
+library(magrittr)
+library(dplyr) 
+
+subdf <- df %>% select( Bankrupt., Net.profit.before.tax.Paid.in.capital, Operating.Gross.Margin , Debt.ratio.., Quick.Ratio,Interest.Coverage.Ratio..Interest.expense.to.EBIT. , Inventory.Turnover.Rate..times. ,Total.Asset.Turnover)
+summary(subdf)
+
+# separate bankruptcy and non-bankruptcy companies
+subdf0 <- subdf %>% filter(Bankrupt.==0)
+subdf1 <- subdf %>% filter(Bankrupt.==1)
+dim(subdf0)
+dim(subdf1)
+```
+
+EDA
+```{r}
+par(mfrow=c(3,2))
+hist(subdf$Bankrupt.,breaks=2,xlab = 'Bankruptcy',main = paste("Histogram of Bankruptcy"))
+hist(subdf$Inventory.Turnover.Rate..times.,breaks=10,main = paste("Histogram of Total Asset Turnover"))
+hist(subdf0$Inventory.Turnover.Rate..times.,breaks=10,main = paste("Histogram of Total Asset Turnover for Non-Bankrupt"))
+hist(subdf1$Inventory.Turnover.Rate..times.,breaks=10,main = paste("Histogram of Total Asset Turnover for Bankrupt"))
+# not same as Operating Expense Rate
+hist(subdf0$Operating.Gross.Margin,breaks=10,main = paste("Histogram of Operating Gross Rate for Non-bankrupt"))
+hist(subdf1$Operating.Gross.Margin,breaks=10,main = paste("Histogram of Operating Gross Rate for Bankrupt"))
+
+
+hist(subdf1$Quick.Ratio,breaks=10,main = paste("Histogram of Operating Gross Rate for Bankrupt"))
+hist(subdf0$Quick.Ratio,breaks=10,main = paste("Histogram of Operating Gross Rate for Bankrupt"))
+
+
+par(mfrow=c(3,2))
+plot(density(subdf$Total.Asset.Turnover)) 
+plot(density(log(subdf$Total.Asset.Turnover)))#log transformation
+plot(density(subdf$Net.profit.before.tax.Paid.in.capital)) 
+plot(density(log(subdf$Net.profit.before.tax.Paid.in.capital)))#log transformation
+plot(density(subdf$Debt.ratio..)) 
+plot(density(log(subdf$Debt.ratio..)))#log transformation
+
+
+par(mfrow=c(1,2))
+boxplot(Operating.Gross.Margin ~ Bankrupt., data = subdf)
+boxplot(Net.profit.before.tax.Paid.in.capital~Bankrupt., data = subdf)
+
+
+plot(df$Bankrupt.,df$Quick.Ratio)
+plot(df$Equity.to.Liability,df$Bankrupt.)
+
+
+pairs(~Bankrupt.+ Net.profit.before.tax.Paid.in.capital + Operating.Gross.Margin + Debt.ratio..+ Quick.Ratio + Interest.Coverage.Ratio..Interest.expense.to.EBIT. + Inventory.Turnover.Rate..times. + Total.Asset.Turnover,df)
+
+
+df <- df %>% mutate( Log.Total.Asset.Turnover= log(Total.Asset.Turnover), Log.PBT=log(Net.profit.before.tax.Paid.in.capital))
+subdf <- subdf %>% mutate(Log.Total.Asset.Turnover= log(Total.Asset.Turnover), Log.PBT=log(Net.profit.before.tax.Paid.in.capital))
+
+```
+
+Unsupervised Learning - PCA
+```{r}
+
+subdf <- subdf %>% mutate(Total.Asset.Growth.Rate = df$Total.Asset.Growth.Rate,Cash.Reinvestment..=df$Cash.Reinvestment.., Research.and.development.expense.rate = df$Research.and.development.expense.rate )
+```
+
+```{r}
+library(ISLR)
+apply(subdf[,c(2:11)],MARGIN=2,mean)
+sum(is.na(subdf))
+
+pr.out <- prcomp(subdf[,c(2:11)], scale=TRUE, center=T, cor =TRUE)
+?prcomp
+  #center=T by default
+summary(pr.out)
+# pr.out$loadings
+names(pr.out)
+round(pr.out$rotation,3)
+head(pr.out$x)
+
+
+screeplot(pr.out, type="l", main="Screeplot") #kink at 2 components suggests we keep 2
+abline(1,0,col='red',lty=2)
+
+
+pr.out$sdev   #sdev is the standard deviations of the principal components
+pr.var <- pr.out$sdev^2
+pr.var
+# pve <- pr.var/sum(pr.var)
+pve <- round(pr.var/sum(pr.var)*100,1)
+pve
+pdf("pdnf.pdf")
+par(mfrow=c(1,2))
+plot(pve, xlab="Principal Component", ylab="Proportion of Variance Explained",type='b')
+plot(cumsum(pve), xlab="Principal Component", ylab="Cumulative Proportion of Variance Explained",type='b')
+abline(80,0,col='red',lty=2)
+
+biplot(pr.out, scale=0)
+```
+
+Unsupervised Learning - Factor Analysis
+```{r}
+library(psych)
+fit <- factanal(subdf, 3)
+names(fit)
+print(fit$loadings, digits=2, cutoff=.3, sort=TRUE)
+
+#scree plot
+ev <- eigen(cor(subdf)) # get eigenvalues
+plot(ev$values,type="l")
+```
+
+Supervised Learning - Classification
+
+```{r}
+library(ISLR)
+df <- df[,c(1:94)]
+head(df)
+# split the data
+set.seed(1)
+train=sample(1:nrow(df), 2000)
+test = -train
+df.train=df[train,]
+df.test=df[-train,]
+bankrupt.test = df[-train,]$Bankrupt.
+
+library(MASS)
+
+#1. learn model
+lda.fit <-  lda(Bankrupt. ~Net.profit.before.tax.Paid.in.capital+ Operating.Gross.Margin + Debt.ratio..+ Quick.Ratio+Interest.Coverage.Ratio..Interest.expense.to.EBIT. + Inventory.Turnover.Rate..times. +Total.Asset.Turnover + Total.Asset.Growth.Rate + Cash.Reinvestment..+ Research.and.development.expense.rate,
+              data = df.train)
+?lda
+#2. predictions on test set
+lda.pred <-  predict(lda.fit, df.test)
+str(lda.pred)
+# str(lda.pred)
+print(cbind(lda.pred$class,bankrupt.test))
+?cbind
+print((lda.pred$class != bankrupt.test))
+#3. compute estimate of test error
+# MSE is not suitable for Classification
+# should use Misclassification Error Rate - proportion of incorrect predictions
+lda.fit
+mean(lda.pred$class != bankrupt.test)
+table(lda.pred$class,bankrupt.test)
+```
+
+```{r}
+# QDA
+qda.fit <-  qda(Bankrupt. ~Net.profit.before.tax.Paid.in.capital+ Operating.Gross.Margin + Debt.ratio..+ Quick.Ratio+Interest.Coverage.Ratio..Interest.expense.to.EBIT. + Inventory.Turnover.Rate..times. +Total.Asset.Turnover+Total.Asset.Growth.Rate + Cash.Reinvestment..+ Research.and.development.expense.rate,
+              data = df, subset = train)
+round(qda.fit$means,3)
+qda.pred <-  predict(qda.fit, df.test)
+mean(qda.pred$class != bankrupt.test)
+
+table(qda.pred$class,bankrupt.test)
+```
+```{r}
+# Logistic regression
+glm.fit <-  glm(Bankrupt. ~Net.profit.before.tax.Paid.in.capital+ Operating.Gross.Margin + Debt.ratio..+ Quick.Ratio+Interest.Coverage.Ratio..Interest.expense.to.EBIT. + Inventory.Turnover.Rate..times. +Total.Asset.Turnover +Total.Asset.Growth.Rate + Cash.Reinvestment..+ Research.and.development.expense.rate,
+              data = df,
+              family = binomial,
+              subset = train)
+summary(glm.fit)
+glm.probs <-  predict(glm.fit, df.test, type = "response")
+glm.pred <-  rep(0, length(glm.probs))
+glm.pred[glm.probs > 0.5] <- 1 # pick a threshold. Here is 0.5
+mean(glm.pred != bankrupt.test)
+
+table(glm.pred, bankrupt.test)
+```
+
+```{r}
+library(class) # to do K-NN
+train.X <-  cbind(df$Net.profit.before.tax.Paid.in.capital, df$Operating.Gross.Margin, df$Debt.ratio.., df$Quick.Ratio,df$Interest.Coverage.Ratio..Interest.expense.to.EBIT., df$Inventory.Turnover.Rate..times.,df$Total.Asset.Turnover)[train,]
+test.X <-  cbind(df$Net.profit.before.tax.Paid.in.capital, df$Operating.Gross.Margin, df$Debt.ratio.., df$Quick.Ratio,df$Interest.Coverage.Ratio..Interest.expense.to.EBIT., df$Inventory.Turnover.Rate..times.,df$Total.Asset.Turnover)[test,]
+train.bankuptcy <-  df$Bankrupt.[train]
+set.seed(1)
+
+# KNN (k=1)
+knn.pred <-  knn(train.X, test.X, train.bankuptcy, k = 1)
+mean(knn.pred != bankrupt.test)
+
+# KNN (k=10)
+knn.pred <-  knn(train.X, test.X, train.bankuptcy, k = 10)
+mean(knn.pred != bankrupt.test)
+
+# KNN (k=100)
+knn.pred <-  knn(train.X, test.X, train.bankuptcy, k = 100)
+mean(knn.pred != bankrupt.test)
+table(knn.pred,bankrupt.test)
+```
+
